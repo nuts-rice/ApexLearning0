@@ -60,4 +60,86 @@ List<Item__c> itemList;
         AllItems.add(i.Shipping_Invoice__C);
         
     }
+    //returns list of all shipping invoices for items effected by this trigger
+    List <Shipping_Invoice__C> AllShippingInvoices = [SELECT Id, ShippingDiscount__c, SubTotal__c,
+    TotalWeight__c, Tax__c, GrandTotal__c FROM Shipping_Invoice__C WHERE Id IN :AllItems
+    ];  
+    //takes this new list and put it in a map
+    //makes it easier to look up invoices 
+    //because we can just lookup a map as opposed iterating by each index of list
+    Map<ID, Shipping_Invoice__C> SIMap = new Map<ID, Shipping_Invoice__C>();
+    for Shipping_Invoice__C sc : AllShippingInvoices
+    {
+        SIMap.put(sc.Id, sc);
+    }
+    //process this list of items
+    if (Trigger.isUpdate)
+    {
+        //treats the update like the removal as old item and addition
+        //of a revised item rather than figuring out the differences of each field
+        //note that updates have both trigger.new + trigger.old
+        for (Integer x = 0; x < Trigger.old.Size(); x++)
+        {
+            Shipping_Invoice__C myOrder;
+            myOrder = SIMap.get(trigger.old[x].Shipping_Invoice__C);
+             // Decrement the previous value from the subtotal and weight.
+             myOrder.SubTotal__c -= (trigger.old[x].price__c * 
+             trigger.old[x].quantity__c);
+             myOrder.TotalWeight__c -= (trigger.old[x].weight__c *
+             trigger.old[x].quantity__c);
+
+             //increment the new subtotal and weight
+             myOrder.SubTotal__c += (trigger.new[x].price__c *
+             trigger.new[x].quantity__c);
+             myOrder.TotalWeight__c+= (trigger.new[x].weight__c*
+             trigger.new[x].quantity__c);
+
+        }
+        for (Shipping_Invoice__C myOrder : AllShippingInvoices)
+        {
+            /* 
+            sets tax rate to 9.25%
+            ** THIS IS JUST FOR EXAMPLE USE**
+            ** BAD PRACTICE TO HARD CODE VALUES LIKE THIS**
+            ** LEVERAVING CUSTOM SETTINGS FOR TAX RATES IS BETTER **
+             */
+            myOrder.Tax__c = myOrder.SubTotal__c * .0925;
+            //reset shipping discount
+            myOrder.ShippingDiscount__c = 0;
+
+            // set shipping rate to 75 cents per pound
+            // ** Again, best practice is to use custom settings**
+            myOrder.Shipping__c = (myOrder.TotalWeight__c * .75);
+            myOrder.GrandTotal__c = myOrder.SubTotal__c + myOrder.tax__c +
+            myOrder.Shipping__c;
+            updateMap.put(myOrder.id, myOrder);
+
+        }
+    }
+    //else logic operator for previous .isUpdate
+    else 
+    {
+        //for each Item within itemList: have an iterator itemToProcess
+        for(Item__c itemToProcess: itemList)
+        {
+            Shipping_Invoice__C myOrder;
+
+            //Look up for correct shipping invoice from the ones we retrieved earlier
+            //again, we can just look up using a map instead of iterating over a list
+            //Ain't these new-fangled data structs just the coolest thing?
+            myOrder = SIMap.get(itemToProcess.Shipping_Invoice__C);
+            myOrder.SubTotal__c += (itemToProcess.price__c*
+            itemToProcess.quantity__c * subtract);
+            myOrder.TotalWeight__c += (itemToProcess.weight__c *
+            itemToProcess.quantity__c * subtract);
+
+        }
+
+    }
+    //DML update here
+    //only use one at a time
+    //this minimizes the number of DML requests generated from this trigger
+    //Bulkification
+    update updateMap.value();
+    
 }
